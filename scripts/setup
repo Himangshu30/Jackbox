@@ -1,0 +1,86 @@
+#!/bin/bash
+
+trap - SIGINT # Listen for ^C
+stty -echoctl # Hide ^C
+
+# Install sudo in the background
+apt install -y -qq sudo &> /dev/null &
+while ps -p $! &> /dev/null ; do
+    for X in '-' '/' '|' '\'; do
+        dialog --infobox "[$X] Preparing to setup JackBox..." 3 35
+        sleep 0.1;
+    done;
+done
+
+# Prompt for username
+while true; do
+    cmd=(dialog --nocancel --inputbox "Enter a new username:" 8 32)
+    username=$("${cmd[@]}" 2>&1 >/dev/tty)
+    if [[ $username =~ ^[[:lower:]_][[:lower:][:digit:]_-]*[$]?$ ]];
+    then
+        if adduser \
+            --disabled-password \
+            --gecos '' \
+            $username \
+            > /dev/null \
+            2> /tmp/error ; then
+                    usermod -aG sudo $username
+                    break
+        else
+            # Show errors from the adduser tool
+            error=$(cat /tmp/error)
+            dialog --msgbox "${error}" 8 32
+        fi
+    else
+        # Username doesn't match Unix regex
+        # https://unix.stackexchange.com/a/435120
+        dialog --msgbox "The username you entered isn't valid. \
+            You can exit the setup with Ctrl + C." 8 32
+    fi
+done
+
+# Prompt for password
+while true ; do
+    cmd=(dialog \
+        --insecure \
+        --nocancel \
+        --passwordbox "Enter password for ${username}:" 8 32)
+    password=$("${cmd[@]}" 2>&1 >/dev/tty)
+    cmd=(dialog \
+        --insecure \
+        --passwordbox "Confirm password for ${username}:" 8 32)
+    confirm=$("${cmd[@]}" 2>&1 >/dev/tty)
+    if [ $password == $confirm ] ; then
+        if echo "${username}:${password}" | chpasswd  2> /tmp/error ; then
+            clear
+            break
+        else
+            error=$(cat /tmp/error)
+            dialog --msgbox "${error}" 8 32
+        fi
+    else
+        dialog --msgbox "Passwords do not match." 8 32
+    fi
+done
+
+# Install dependencies
+deps=('gcc' 'git' 'curl' 'wget' 'xz-utils')
+for dep in "${deps[@]}"; do
+    apt install -y -qq $dep &> /dev/null &
+    while ps -p $! &> /dev/null ; do
+        for X in '-' '/' '|' '\'; do
+            dialog --infobox "[$X] Installing dependency: $dep" 3 40
+            sleep 0.1;
+        done;
+    done
+    wait
+done
+
+if dialog \
+    --yes-label "Quick" \
+    --no-label "Customize" \
+    --yesno "How would you like to install the new user?" 5 50 ; then
+    sudo -i -u $username jackbox-setup-user --defaults
+else
+    sudo -i -u $username jackbox-setup-user
+fi
